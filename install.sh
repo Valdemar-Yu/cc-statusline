@@ -14,7 +14,8 @@ echo "✅ Copied statusline.py -> $DEST"
 
 SNIPPET='  "statusLine": {
     "type": "command",
-    "command": "python3 '"$DEST"'"
+    "command": "python3 '"$DEST"'",
+    "refreshInterval": 60
   }'
 
 if [ -f "$SETTINGS" ] && grep -q '"statusLine"' "$SETTINGS"; then

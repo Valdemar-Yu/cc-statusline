@@ -39,12 +39,23 @@ cd cc-statusline
 {
   "statusLine": {
     "type": "command",
-    "command": "python3 ~/.claude/statusline.py"
+    "command": "python3 ~/.claude/statusline.py",
+    "refreshInterval": 60
   }
 }
 ```
 
 3. Open a new Claude Code window (the current session won't refresh live).
+
+## Keeping it live during idle
+
+A status line is **pull-based**: Claude Code runs the script, it prints once, and exits. By default it only re-runs on events (a new assistant message, `/compact`, a mode change), which **go quiet when the session is idle** — so the reset countdowns appear frozen until you interact again.
+
+The `"refreshInterval": 60` field above tells Claude Code to also re-run the script **every 60 seconds** on a timer (minimum `1`). Because the countdown is computed from the absolute `resets_at` timestamp each run, it then ticks down on its own while you're idle.
+
+**This costs zero tokens.** The refresh only re-runs a local script over data Claude Code already has — it makes no API call and triggers no model inference. The only cost is a few milliseconds of local CPU.
+
+The flip side of that: the rate-limit **used %** and context token counts come from the *last API response*, so they can't change while idle (there's no new API call to refresh them). That's fine — idle means nothing is being consumed — and they update instantly the moment you interact. Tune the interval down (e.g. `10`) if you want a snappier local refresh; it's still free.
 
 ## Notes
 
