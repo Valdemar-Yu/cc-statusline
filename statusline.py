@@ -2,7 +2,7 @@
 """Claude Code custom statusline (single line).
 
 Layout / 布局:
-  🤖 <model> [1M] ⚡<effort>   🧠 <context-bar> <used%> (<used>/<size>)   ⏳ 5h <remaining%> ↻<reset>   📅 7d <remaining%> ↻<reset>
+  🤖 <model> [1M] ⚡<effort>   🧠 <context-bar> <used%> (<used>/<size>)   ⏳ 5h <remaining%> ↻<reset>   📅 7d <remaining%> ↻<reset>   🕐 <date time>
 
 - model name; appends "[1M]" when the model runs the 1M-token context window
   模型名; 1M 上下文窗口时追加 "[1M]"
@@ -13,13 +13,18 @@ Layout / 布局:
 - rate limits (`rate_limits.five_hour` / `seven_day`) show REMAINING % + reset countdown;
   Claude.ai Pro/Max only, appears after the first API response; each window degrades gracefully if absent
   额度显示"剩余"% + 重置倒计时; 仅 Pro/Max, 首次 API 响应后出现, 缺失则优雅省略
+- 🕐 clock: responsive to terminal width via the COLUMNS env var (Claude Code v2.1.153+).
+  Degrades full "YY-MM-DD HH:MM" -> "MM-DD HH:MM" -> "HH:MM" -> hidden as space shrinks.
+  时钟按 COLUMNS 宽度分级降级: 完整 -> 去年份 -> 只时间 -> 隐藏
 
 Any error degrades silently — the statusline never crashes. / 任何异常都静默降级。
 
 Reads a JSON session object on stdin, prints one line on stdout.
 Docs: https://code.claude.com/docs/en/statusline
 """
-import sys, json, os, time, re
+import sys, json, os, time, re, unicodedata, shutil
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 def read_input():
     try:
@@ -29,6 +34,29 @@ def read_input():
 
 def c(txt, code):
     return f"\033[{code}m{txt}\033[0m"
+
+def disp_width(s):
+    """Rendered terminal width: ANSI codes count 0, emoji/CJK-wide count 2, rest 1."""
+    s = _ANSI_RE.sub("", s)
+    w = 0
+    for ch in s:
+        o = ord(ch)
+        if unicodedata.combining(ch) or 0xFE00 <= o <= 0xFE0F:  # combining / variation selector
+            continue
+        if (unicodedata.east_asian_width(ch) in ("W", "F")
+                or 0x1F000 <= o <= 0x1FAFF or 0x2600 <= o <= 0x27BF
+                or 0x2300 <= o <= 0x23FF or 0x2B00 <= o <= 0x2BFF):
+            w += 2
+        else:
+            w += 1
+    return w
+
+def term_width():
+    """Current terminal width: prefer COLUMNS (Claude Code v2.1.153+), fall back to probe/80."""
+    try:
+        return int(os.environ["COLUMNS"])
+    except (KeyError, ValueError):
+        return shutil.get_terminal_size((80, 24)).columns
 
 def human(n):
     n = int(n or 0)
@@ -148,7 +176,25 @@ def main():
             txt += c(f" ↻{cd}", "90")
         parts.append(txt)
 
-    sys.stdout.write("  ".join(parts))
+    # ---- clock (rightmost), responsive to terminal width ----
+    # kept live between events by "refreshInterval" in settings; COLUMNS injected by Claude Code
+    SEP = "  "
+    base_w = disp_width(SEP.join(parts))
+    lt = time.localtime()
+    variants = [
+        time.strftime("%y-%m-%d %H:%M", lt),  # 26-07-16 10:49
+        time.strftime("%m-%d %H:%M", lt),     # 07-16 10:49
+        time.strftime("%H:%M", lt),           # 10:49
+    ]
+    avail = term_width() - base_w - disp_width(SEP) - 1  # -1 margin to avoid edge wrap
+    for v in variants:
+        seg_txt = f"🕐 {v}"
+        if disp_width(seg_txt) <= avail:
+            parts.append(c(seg_txt, "90"))
+            break
+    # if even "HH:MM" won't fit, the clock is omitted entirely
+
+    sys.stdout.write(SEP.join(parts))
 
 if __name__ == "__main__":
     main()

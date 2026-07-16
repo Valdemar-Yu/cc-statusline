@@ -6,12 +6,22 @@ A compact single-line [status line](https://code.claude.com/docs/en/statusline) 
 - ⚡ **Reasoning effort** — the live `/effort` level (`low` / `medium` / `high` / `xhigh` / `max`)
 - 🧠 **Context usage** — a color-coded progress bar (green → yellow → red) with `used% (tokens/size)`
 - ⏳ 📅 **Subscription rate limits** — **remaining** % and reset countdown for the **5-hour** and **7-day** windows (Claude.ai Pro/Max)
+- 🕐 **Clock** — date + time on the right, **responsive to terminal width** (drops the year, then the date, then hides as space shrinks)
 
 ```
-🤖 Opus 4.8 [1M] ⚡high  🧠 █░░░░░░░ 8% (80k/1M)  ⏳ 5h 76% ↻2h14m  📅 7d 59% ↻3d5h
+🤖 Opus 4.8 [1M] ⚡high  🧠 █░░░░░░░ 8% (80k/1M)  ⏳ 5h 76% ↻2h14m  📅 7d 59% ↻3d5h  🕐 26-07-16 10:57
 ```
 
-Everything degrades gracefully: no `[1M]` on 200k models, no `⚡` when the model doesn't support effort, and the rate-limit segments are omitted until Claude Code provides them (Pro/Max, after the first API response of the session).
+Everything degrades gracefully: no `[1M]` on 200k models, no `⚡` when the model doesn't support effort, the rate-limit segments are omitted until Claude Code provides them (Pro/Max, after the first API response of the session), and the clock shrinks or disappears on narrow terminals.
+
+The clock adapts using the `COLUMNS` env var that Claude Code injects (v2.1.153+):
+
+| Terminal width | Clock |
+| --- | --- |
+| wide | `🕐 26-07-16 10:57` |
+| tighter | `🕐 07-16 10:57` (no year) |
+| narrow | `🕐 10:57` (time only) |
+| very narrow | hidden |
 
 ## Requirements
 
