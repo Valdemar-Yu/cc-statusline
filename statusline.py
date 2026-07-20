@@ -23,6 +23,7 @@ Reads a JSON session object on stdin, prints one line on stdout.
 Docs: https://code.claude.com/docs/en/statusline
 """
 import sys, json, os, time, re, unicodedata, shutil
+import urllib.request
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -142,6 +143,72 @@ def context_from_transcript(data):
     size = 1_000_000 if "1m" in mid.lower() else 200_000
     return (used / size * 100 if size else 0), size, used
 
+# ---- Kimi Coding Plan quota (fallback when official rate_limits absent) ----
+_KIMI_CACHE = os.path.expanduser("~/.claude/.kimi_usage_cache.json")
+_KIMI_CACHE_TTL = 120  # seconds between network calls
+
+def _parse_iso(s):
+    """'2026-07-19T08:26:44.702772Z' -> unix seconds."""
+    try:
+        from datetime import datetime, timezone
+        return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return None
+
+def kimi_quota():
+    """Query api.kimi.com/coding/v1/usages; cached on disk for _KIMI_CACHE_TTL.
+
+    Returns {"five_hour": {...}, "seven_day": {...}} in the same shape the
+    rate_limits renderer expects, or None on any failure (silent degrade).
+    """
+    base = os.environ.get("ANTHROPIC_BASE_URL", "")
+    key = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")
+    if "kimi" not in base or not key:
+        return None
+    # fresh cache?
+    try:
+        if time.time() - os.path.getmtime(_KIMI_CACHE) < _KIMI_CACHE_TTL:
+            with open(_KIMI_CACHE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(
+            "https://api.kimi.com/coding/v1/usages",
+            headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            d = json.loads(r.read())
+        out = {}
+        for w in d.get("limits") or []:
+            win = w.get("window") or {}
+            det = w.get("detail") or {}
+            if win.get("duration") == 300 and det.get("remaining") is not None:
+                out["five_hour"] = {
+                    "used_percentage": 100 - float(det["remaining"]),
+                    "resets_at": _parse_iso(det.get("resetTime", "")),
+                }
+        u = d.get("usage") or {}
+        if u.get("remaining") is not None:
+            out["seven_day"] = {
+                "used_percentage": 100 - float(u["remaining"]),
+                "resets_at": _parse_iso(u.get("resetTime", "")),
+            }
+        result = out or None
+        if result:
+            try:
+                with open(_KIMI_CACHE, "w") as f:
+                    json.dump(result, f)
+            except Exception:
+                pass
+        return result
+    except Exception:
+        # network down etc.: serve stale cache if we have one
+        try:
+            with open(_KIMI_CACHE) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
 def main():
     data = read_input()
 
@@ -165,6 +232,8 @@ def main():
 
     # ---- rate limits (may be absent) ----
     rl = data.get("rate_limits") or {}
+    if not (rl.get("five_hour") or rl.get("seven_day")):
+        rl = kimi_quota() or {}
     for key, label, emoji in (("five_hour", "5h", "⏳"), ("seven_day", "7d", "📅")):
         w = rl.get(key)
         if not w or w.get("used_percentage") is None:
